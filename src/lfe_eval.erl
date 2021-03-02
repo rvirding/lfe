@@ -215,9 +215,18 @@ eval_expr(['record-update',E,Name|Args], Env) ->
     Ev = eval_expr(E, Env),
     case lfe_env:get_record(Name, Env) of
         {yes,Fields} ->
-            update_record_tuple(Name, Fields, Ev, Args, Env);
+            update_record_tuple(Ev, Name, Fields, Args, Env);
         no -> undefined_record_error(Name)
     end;
+%% Struct special forms.
+eval_expr(['make-struct',Name|Fs], Env) ->
+    make_struct_map(Name, Fs, Env);
+eval_expr(['struct-field',E,Name,F], Env) ->
+    Ev = eval_expr(E, Env),
+    get_struct_field(Ev, Name, F);
+eval_expr(['struct-update',E,Name|Fs], Env) ->
+    Ev = eval_expr(E, Env),
+    update_struct_map(Ev, Name, Fs, Env);
 %% Function forms.
 eval_expr([function,Mod,Name,Arity], _Env) ->
     %% Don't evaluate the arguments here.
@@ -289,7 +298,7 @@ eval_expr(Symb, Env) when is_atom(Symb) ->
     end;
 eval_expr(E, _) -> E.                           %Atomic evaluate to themselves
 
-%% make_record_tuple(Name, Fields, Args, Env) -> TupleList.
+%% make_record_tuple(Name, Fields, Args, Env) -> Record.
 %%  We have to macro expand and evaluate the default values here as well.
 
 make_record_tuple(Name, Fields, Args, Env) ->
@@ -320,10 +329,10 @@ get_field_index(Name, [_|Fields], F, I) ->
 get_field_index(Name, [], F, _I) ->
     undefined_field_error(Name, F).
 
-%% update_record_tuple(Name, Fields, Record, Args, Env) -> TupleList
+%% update_record_tuple(Record, Name, Fields, Args, Env) -> TupleList
 %%  Update the Record with the Args.
 
-update_record_tuple(Name, Fields, Rec, Args, Env) ->
+update_record_tuple(Rec, Name, Fields, Args, Env) ->
     Es = update_record_elements(Fields, tl(tuple_to_list(Rec)), Args, Env),
     list_to_tuple([Name|Es]).
 
@@ -337,6 +346,39 @@ update_field_val(F, [F,V|_], _Recv, Env) -> eval_expr(V, Env);
 update_field_val(F, [_,_|Args], Recv, Env) ->
     update_field_val(F, Args, Recv, Env);
 update_field_val(_, [], Recv, _Env) -> Recv.
+
+%% make_struct_map(Name, Fields, Env) -> Struct.
+%%  We have to macro expand and evaluate the values in the fields. Use
+%%  the __struct__/1 cheack and build the new struct.
+
+make_struct_map(Name, Fields, Env) ->
+    Efs = make_struct_fields(Name, Fields, Env),
+    Name:'__struct__'(Efs).
+
+make_struct_fields(Name, [Key,Val|Kvs], Env) ->
+    [{Key,eval_expr(Val, Env)}|make_struct_fields(Name, Kvs, Env)];
+make_struct_fields(Name, [Key], _Env) ->
+    eval_error({missing_struct_field_value,Name,Key});
+make_struct_fields(_Name, [], _Env) ->  [].
+
+get_struct_field(Str, Name, Field) ->
+    case Str of
+	#{'__struct__' := Name, Field := Val} -> Val;
+	_ ->
+	    eval_error({badstruct,Name,Str})
+    end.
+
+%% update_struct_map(Struct, Name, Fields) -> Struct.
+%%  Update the Record with the Args.
+
+update_struct_map(Str, Name, Fields, Env) ->
+    case Str of
+	#{'__struct__' := Name} ->
+	    Assocs = make_struct_fields(Name, Fields, Env),
+	    lists:foldl(fun maps_update/2, Str, Assocs);
+	_ ->
+	    eval_error({badstruct,Name,Str})
+    end.
 
 %% get_fbinding(NAme, Arity, Env) ->
 %%     {yes,Module,Fun} | {yes,Binding} | no.
@@ -1089,6 +1131,9 @@ match(['record-index',Name,F], Val, Pbs, Env) ->
             match(Index, Val, Pbs, Env);
         no -> undefined_record_error(Name)
     end;
+%% Struct patterns.
+match(['make-struct',Name|Fs], Val, Pbs, Env) ->
+    match_struct_map(Name, Fs, Val, Pbs, Env);
 %% No constructor list forms.
 match([_|_]=List, Val, Pbs, _) ->               %No constructor
     case lfe_lib:is_posint_list(List) of        %Accept strings
@@ -1143,6 +1188,17 @@ match_record_patterns(Fields, Pats) ->
 make_field_pat(F, [F,P|_]) -> P;
 make_field_pat(F, [_,_|Pats]) -> make_field_pat(F, Pats);
 make_field_pat(_, []) -> '_'.                   %Underscore matches anything
+
+%% match_struct_map(Name, Pats, Val, Pbs, Env) -> {yes,Pbs} | no.
+
+match_struct_map(Name, Pats, Val, Pbs, Env) ->
+    Str = [map,?Q('__struct__'),?Q(Name)|match_struct_fields(Pats)],
+    match(Str, Val, Pbs, Env).
+
+match_struct_fields([Key,Val|Kvs]) ->
+    [?Q(Key),Val|match_struct_fields(Kvs)];
+match_struct_fields([Key]) -> eval_error({missing_field_value,Key});
+match_struct_fields([]) ->  [].
 
 %% match_binary(Bitsegs, Binary, PatBindings, Env) -> {yes,PatBindings} | no.
 %%  Match Bitsegs against Binary. Bad matches result in an error, we

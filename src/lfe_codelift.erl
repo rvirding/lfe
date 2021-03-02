@@ -104,7 +104,7 @@ lift_funcs(Defs, St) ->
 
 %% Core data special forms.
 lift_expr(?Q(E), Lds, St) -> {?Q(E),Lds,St};
-%% Record forms.
+%% Record special forms.
 lift_expr(['make-record',Name|Args], Lds0, St0) ->
     {Largs,Lds1,St1} = lift_rec_args(Args, Lds0, St0),
     {['make-record',Name|Largs],Lds1,St1};
@@ -117,6 +117,17 @@ lift_expr(['record-update',E,Name|Args], Lds0, St0) ->
     {Le,Lds1,St1} = lift_expr(E, Lds0, St0),
     {Largs,Lds2,St2} = lift_rec_args(Args, Lds1, St1),
     {['record-update',Le,Name|Largs],Lds2,St2};
+%% Struct special forms.
+lift_expr(['make-struct',Name|Args], Lds0, St0) ->
+    {Largs,Lds1,St1} = lift_rec_args(Args, Lds0, St0),
+    {['make-struct',Name|Largs],Lds1,St1};
+lift_expr(['struct-field',E, Name,F], Lds0, St0) ->
+    {Le,Lds1,St1} = lift_expr(E, Lds0, St0),
+    {['struct-field',Le,Name,F],Lds1,St1};
+lift_expr(['struct-update',E,Name|Args], Lds0, St0) ->
+    {Le,Lds1,St1} = lift_expr(E, Lds0, St0),
+    {Largs,Lds2,St2} = lift_rec_args(Args, Lds1, St1),
+    {['struct-update',Le,Name|Largs],Lds2,St2};
 %% Function forms.
 lift_expr([function,_,_]=Func, Lds, St) ->
     {Func,Lds,St};

@@ -872,6 +872,8 @@ exp_predef(['fun',M,F,Ar], _, St0) ->
     {yes,['lambda',Vs,['call',?Q(M),?Q(F)|Vs]],St1};
 exp_predef(['defrecord'|Def], Env, St) ->
     lfe_macro_record:define(Def, Env, St);
+exp_predef(['defstruct'|Def], Env, St) ->
+    lfe_macro_struct:define(Def, Env, St);
 %% Common Lisp inspired macros.
 exp_predef([defmodule,Name|Rest], _, St) ->
     %% Define the MODULE macro.

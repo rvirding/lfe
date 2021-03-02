@@ -649,6 +649,26 @@ to_expr(['record-update',E,Name|Fs], L, Vt, St0) ->
     {Ee,St1} = to_expr(E, L, Vt, St0),
     {Efs,St2} = to_rec_fields(Fs, L, Vt, St1),
     {{record,L,Ee,Name,Efs},St2};
+%% Struct special forms.
+to_expr(['make-struct',Name|Fs], L, Vt, St) ->
+    Make = [call,?Q(Name),?Q('__struct__'),
+	    [call,?Q(lfe_struct),?Q('to_assocs'),[list|to_struct_fields(Fs)]]],
+    to_expr(Make, L, Vt, St);
+to_expr(['struct-field',E,Name,F], L, Vt, St) ->
+    Field = ['case',E,
+	     [[map,?Q('__struct__'),?Q(Name),?Q(F),'|-field-|'],'|-field-|'],
+	     ['|-struct-|',
+	       [call,?Q(erlang),?Q(error),
+		[tuple,?Q(badstruct),?Q(Name),'|-struct-|']]]],
+    to_expr(Field, L, Vt, St);
+to_expr(['struct-update',E,Name|Fs], L, Vt, St) ->
+    Update = ['case',E,
+	      [['=','|-struct-|',[map,?Q('__struct__'),?Q(Name)]],
+	       ['map-update','|-struct-|'|to_struct_fields(Fs)]],
+	      ['|-struct-|',
+	       [call,?Q(erlang),?Q(error),
+		[tuple,?Q(badstruct),?Q(Name),'|-struct-|']]]],
+    to_expr(Update, L, Vt, St);
 %% Function forms.
 to_expr([function,F,Ar], L, Vt, St) ->
     %% Must handle the special cases here.
@@ -864,6 +884,12 @@ to_rec_fields([F,V|Fs], L, Vt, St0) ->
     {Efs,St2} = to_rec_fields(Fs, L, Vt, St1),
     {[{record_field,L,{atom,L,F},Ev}|Efs],St2};
 to_rec_fields([], _, _, St) -> {[],St}.
+
+%% to_struct_fields(Fields) -> Fields.
+
+to_struct_fields([F,V|Fs]) ->
+    [?Q(F),V|to_struct_fields(Fs)];
+to_struct_fields([]) -> [].
 
 %% to_fun_cls(Clauses, LineNumber) -> Clauses.
 %% to_fun_cl(Clause, LineNumber) -> Clause.
@@ -1120,12 +1146,18 @@ to_pat([binary|Segs], L, Pvs0, Vt0, St0) ->
 to_pat([map|Pairs], L, Pvs0, Vt0, St0) ->
     {As,Pvs1,Vt1,St1} = to_pat_map_pairs(Pairs, L, Pvs0, Vt0, St0),
     {{map,L,As},Pvs1,Vt1,St1};
+%% Record patterns.
 to_pat(['make-record',R|Fs], L, Pvs0, Vt0, St0) ->
     {Efs,Pvs1,Vt1,St1} = to_pat_rec_fields(Fs, L, Pvs0, Vt0, St0),
     {{record,L,R,Efs},Pvs1,Vt1,St1};
 to_pat(['record-index',R,F], L, Pvs, Vt, St) ->
     {{record_index,L,R,{atom,L,F}},Pvs,Vt,St};
-to_pat(['=',P1,P2], L, Pvs0, Vt0, St0) ->       %Alias
+%% Struct patterns.
+to_pat(['make-struct',Name|Fs], L, Pvs, Vt, St) ->
+    Pat = [map,?Q('__struct__'),?Q(Name)|to_struct_fields(Fs)],
+    to_pat(Pat, L, Pvs, Vt, St);
+%% Alias
+to_pat(['=',P1,P2], L, Pvs0, Vt0, St0) ->
     {Ep1,Pvs1,Vt1,St1} = to_pat(P1, L, Pvs0, Vt0, St0),
     {Ep2,Pvs2,Vt2,St2} = to_pat(P2, L, Pvs1, Vt1, St1),
     {{match,L,Ep1,Ep2},Pvs2, Vt2,St2};
